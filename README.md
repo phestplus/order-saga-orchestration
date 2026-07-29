@@ -10,5 +10,5 @@ An order touches multiple services (inventory, payment, shipping); a distributed
 - Go services for order/inventory/payment, Node.js for a notification/BFF service
 - Saga orchestration with compensating transactions on failure
 - Message broker-based communication (Kafka or NATS)
-- `scripts/simulate.sh` — end-to-end script placing orders including forced mid-saga failures to prove compensation logic works
+- `scripts/simulate.sh`: end-to-end script placing orders including forced mid-saga failures to prove compensation logic works
 - Architecture diagram + tradeoffs section in README (choreography vs orchestration)
