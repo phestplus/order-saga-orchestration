@@ -1,0 +1,72 @@
+services:
+  nats:
+    image: nats:2.12-alpine
+    ports:
+      - "4222:4222"
+    healthcheck:
+      # NATS exposes a monitoring port; a TCP connect to the client port
+      # is enough to know it is accepting traffic.
+      test: ["CMD", "sh", "-c", "wget -q -O- http://127.0.0.1:8222/healthz || nc -z 127.0.0.1 4222"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    command: ["-m", "8222"]
+
+  order-service:
+    build:
+      context: .
+      args:
+        SERVICE: order-service
+    ports:
+      - "8080:8080"
+    environment:
+      NATS_URL: nats://nats:4222
+      PORT: 8080
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  inventory-service:
+    build:
+      context: .
+      args:
+        SERVICE: inventory-service
+    environment:
+      NATS_URL: nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: .
+      args:
+        SERVICE: payment-service
+    environment:
+      NATS_URL: nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  shipping-service:
+    build:
+      context: .
+      args:
+        SERVICE: shipping-service
+    environment:
+      NATS_URL: nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+
+  notification-service:
+    build:
+      context: ./notification-service
+    ports:
+      - "8081:8080"
+    environment:
+      NATS_URL: nats://nats:4222
+      PORT: 8080
+    depends_on:
+      nats:
+        condition: service_healthy
