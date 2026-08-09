@@ -1,0 +1,3 @@
+# scripts/simulate.sh is authored on Windows and executed by bash on the
+# Linux CI runner, where CRLF fails as "bash: \r: command not found".
+* text=auto eol=lf
