@@ -1,0 +1,13 @@
+// tsconfig.json compiles only src/ so dist/ holds the service and
+// nothing else. Vitest strips types with esbuild rather than checking
+// them, so without this config a type error in test/ would never fail
+// anything. `npm run typecheck` runs it in CI.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.mts"]
+}
