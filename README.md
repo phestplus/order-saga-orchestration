@@ -1,6 +1,6 @@
 # Event-Driven Order Orchestration (Saga Pattern)
 
-A distributed transaction across four services with no two-phase commit: an order reserves stock, takes payment, and books a shipment, and when any step fails the completed ones are undone in reverse. Built to prove I understand what actually goes wrong with sagas, not just that I can draw the happy path.
+A distributed transaction across four services with no two-phase commit: an order reserves stock, takes payment, and books a shipment, and when any step fails the completed ones are undone in reverse. The design centres on what actually goes wrong with sagas rather than on the happy path.
 
 ## The problem
 
@@ -10,7 +10,7 @@ The textbook answer is two-phase commit, and essentially nobody uses it across s
 
 That trade has a consequence people skip past. Between the charge succeeding and the refund landing, the system is genuinely inconsistent and a customer really has been charged for an order that will not ship. The saga's promise is that it converges, not that the window never exists.
 
-## What I built
+## Components
 
 Five services and a broker:
 
@@ -48,7 +48,7 @@ The notification service's job is largely to preserve that distinction: a rolled
 
 **One failed compensation does not stop the others.** If the refund fails, inventory still gets released. Undoing two of three effects is strictly better than abandoning the rollback, so the loop records the failure and keeps going.
 
-**Participants deduplicate, and it needed a real lock.** NATS request/reply is at-least-once, so a participant will eventually see the same command twice, and a duplicate `refund` means refunding twice. My first implementation checked a "have I seen this?" map, released the mutex, then ran the handler, which leaves a window where concurrent redeliveries both find the key absent and both charge the card. `TestConcurrentDuplicatesApplyOnce` caught it with 20 goroutines, and the fix is a per-key `sync.Once` so the first caller runs the handler while the rest block and read its reply.
+**Participants deduplicate, and it needed a real lock.** NATS request/reply is at-least-once, so a participant will eventually see the same command twice, and a duplicate `refund` means refunding twice. A seen-keys map that releases the mutex before running the handler leaves a window where concurrent redeliveries both find the key absent and both charge the card. `TestConcurrentDuplicatesApplyOnce` caught it with 20 goroutines, and the fix is a per-key `sync.Once` so the first caller runs the handler while the rest block and read its reply.
 
 **Refusals are memoized, not just successes.** A participant that answered "out of stock" must give the same answer on redelivery. Letting a concurrent stock change flip that answer after the orchestrator already compensated would corrupt the saga's view of what happened.
 
@@ -60,11 +60,11 @@ Both are sagas. The difference is where the workflow lives.
 
 **Orchestration**, which this project uses, has one component that holds the sequence and tells each participant what to do.
 
-I picked orchestration for the reason that shows up in `cmd/order-service/main.go`: the entire workflow, forward steps and compensations, is a readable list in one file. Under choreography that same workflow exists only as an emergent consequence of who subscribes to what, and no single file describes it. When an order gets stuck halfway, "what was supposed to happen next?" is a question you answer by reading one list rather than by tracing event subscriptions across four repositories. Compensation ordering makes this worse for choreography: unwinding in reverse requires each service to know what came before it, which is exactly the coupling choreography was supposed to remove.
+Orchestration wins here for the reason visible in `cmd/order-service/main.go`: the entire workflow, forward steps and compensations, is a readable list in one file. Under choreography that same workflow exists only as an emergent consequence of who subscribes to what, and no single file describes it. When an order gets stuck halfway, "what was supposed to happen next?" is a question you answer by reading one list rather than by tracing event subscriptions across four repositories. Compensation ordering makes this worse for choreography: unwinding in reverse requires each service to know what came before it, which is exactly the coupling choreography was supposed to remove.
 
-The honest cost: `order-service` knows about all three participants and is a single point of failure for starting new sagas, and every new step means editing it. For a workflow this shape, with a fixed sequence that must unwind in a defined order, I think that is the right trade. For something like "email marketing when a user signs up", where consumers are independent and order does not matter, choreography is clearly better.
+The cost: `order-service` knows about all three participants, is a single point of failure for starting new sagas, and must be edited for every new step. That is the right trade for a fixed sequence that must unwind in a defined order. For independent consumers where ordering does not matter, such as fan-out on user signup, choreography is the better fit.
 
-**NATS rather than Kafka.** This workload needs request/reply, because the orchestrator cannot decide the next step without knowing whether the last one succeeded, and NATS core has that as a first-class primitive. Kafka is a log, and doing request/reply over it means a reply topic plus correlation IDs plus consumer groups, which is a lot of machinery for a call-and-response. Kafka's real strength is durable, replayable, partitioned history, and none of this design needs replay. The tradeoff is real and worth stating: NATS core is at-most-once on the wire with no persistence, so if the orchestrator dies mid-saga the in-flight state is gone. See limitations.
+**NATS rather than Kafka.** This workload needs request/reply, because the orchestrator cannot decide the next step without knowing whether the last one succeeded, and NATS core has that as a first-class primitive. Kafka is a log, and doing request/reply over it means a reply topic plus correlation IDs plus consumer groups, which is a lot of machinery for a call-and-response. Kafka's real strength is durable, replayable, partitioned history, and none of this design needs replay. The tradeoff is real and worth stating: NATS core is at-most-once on the wire with no persistence, so if the orchestrator dies mid-saga the in-flight state is gone. See Scope.
 
 ## Architecture
 
@@ -134,7 +134,7 @@ make down
 - `node-test`: `npm ci`, build, `npm run typecheck`, `npm test`. Typecheck is separate because Vitest strips types rather than checking them.
 - `e2e`: brings up the real compose stack and runs `scripts/simulate.sh` against it.
 
-## Known limitations (things I'd change for a real production system)
+## Scope
 
 - **Saga state is in memory in the orchestrator.** If `order-service` restarts mid-saga, the in-flight saga is lost: steps already applied are never compensated. A real implementation persists a saga log before each step and recovers on startup, which is the single biggest gap here and the reason NATS JetStream or a database would be a requirement rather than a nicety.
 - **No retries on the forward path.** A transient transport error fails the step and triggers a full rollback, when retrying would often have succeeded. Participants deduplicate specifically so retries would be safe to add, but the retry loop itself is not implemented.

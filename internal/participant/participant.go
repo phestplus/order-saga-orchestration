@@ -18,7 +18,7 @@ type Handler func(ctx context.Context, cmd saga.Command) error
 
 // entry memoizes the outcome of one (saga, action) pair.
 //
-// A plain "have I seen this key?" map guarded by a mutex is not enough,
+// A plain seen-keys map guarded by a mutex is not enough,
 // because the handler must run outside the lock (it does real work and
 // can block). Two concurrent redeliveries would both find the key absent
 // and both charge the card. sync.Once closes that window: the first
